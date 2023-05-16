@@ -255,6 +255,7 @@ def perform_experiment(yml, conn, info, results) -> list():
         experiment_times = conn.execute(N_RUNS, params)
     except connector.ConnectorException as ex:
         tqdm.write(f"\nAn error occurred for {system} while executing {path_to_file}: {str(ex)}\n")
+        sys.stdout.flush()
         raise BenchmarkError()
 
     # Add measurements to result
@@ -331,7 +332,6 @@ if __name__ == '__main__':
 
     benchmark_files = sorted(list(set(benchmark_files)))
 
-
     # Set up counters
     num_experiments_total = 0
     num_experiments_passed = 0
@@ -350,10 +350,12 @@ if __name__ == '__main__':
     if output_csv_file:
         if not os.path.isfile(output_csv_file): # file does not yet exist
             tqdm.write(f'Writing measurements to \'{output_csv_file}\'.')
+            sys.stdout.flush()
             with open(output_csv_file, 'w') as csv:
                 csv.write('commit,date,version,suite,benchmark,experiment,name,config,case,time\n')
         else:
             tqdm.write(f'Adding measurements to \'{output_csv_file}\'.')
+            sys.stdout.flush()
 
     # A central object to collect all measurements of all experiments.  Has the following structure:
     #
@@ -372,6 +374,7 @@ if __name__ == '__main__':
 
     repo = Repo('.')
     commit = repo.head.commit
+    repo.__del__()
 
     # Set up event log
     log = tqdm(total=0, position=1, ncols=80, leave=False, bar_format='{desc}', disable=not is_interactive)
@@ -384,6 +387,7 @@ if __name__ == '__main__':
         # Validate schema
         if not validate_schema(path_to_file, YML_SCHEMA):
             tqdm.write(f'Benchmark file "{path_to_file}" violates schema.')
+            sys.stdout.flush()
             continue
 
         with open(path_to_file, 'r') as yml_file:
@@ -409,6 +413,7 @@ if __name__ == '__main__':
             tqdm.write('\n\n==========================================================')
             tqdm.write(f'Perform benchmarks in \'{path_to_file}\'.')
             tqdm.write('==========================================================')
+            sys.stdout.flush()
 
             # Perform experiment for each system
             for system in yml.get('systems').keys():

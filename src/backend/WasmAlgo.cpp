@@ -1,5 +1,6 @@
 #include "backend/WasmAlgo.hpp"
 
+#include <mutable/catalog/Catalog.hpp>
 #include <numeric>
 
 
@@ -16,15 +17,46 @@ void m::wasm::quicksort(Buffer<IsGlobal> &buffer, const std::vector<SortingOpera
 {
     static_assert(IsGlobal, "quicksort on local buffers is not yet supported");
 
+    /*----- Compute entries which are needed for `order`. -----*/
+    Schema entries_to_order;
+    for (auto &o : order) {
+        visit(overloaded {
+            [&entries_to_order](const ast::Designator &d) -> void {
+                Schema::Identifier id(d.table_name.text, d.attr_name.text);
+                if (not entries_to_order.has(id))
+                    entries_to_order.add(id, d.type());
+            },
+            [&entries_to_order](const ast::FnApplicationExpr &fn) {
+                switch (fn.get_function().fnid) {
+                    default:
+                        break; // nothing to be done
+                    case m::Function::FN_COUNT:
+                    case m::Function::FN_MIN:
+                    case m::Function::FN_MAX:
+                    case m::Function::FN_SUM:
+                    case m::Function::FN_AVG: {
+                        std::ostringstream oss;
+                        oss << fn;
+                        Schema::Identifier id(Catalog::Get().pool(oss.str().c_str()));
+                        if (not entries_to_order.has(id))
+                            entries_to_order.add(id, fn.type());
+                    }
+                }
+                throw visit_stop_recursion(); // to not visit function and argument expressions
+            },
+            [](auto&) { /* nothing to be done */ }
+        }, o.first, tag<ast::ConstPreOrderExprVisitor>());
+    }
+
     /*----- Create load and swap proxies for buffer. -----*/
-    auto load = buffer.create_load_proxy();
+    auto load = buffer.create_load_proxy(entries_to_order); // loading is only used for comparison w.r.t. `order`
     auto swap = buffer.create_swap_proxy();
 
     /*---- Create branchless binary partition function. -----*/
     /* Receives the ID of the first tuple to partition, the past-the-end ID to partition, and the ID of the pivot
      * element as parameters. Returns ID of partition boundary s.t. all elements before this boundary are smaller
-     * than or equal to the pivot element and all elements after or equal this boundary are greater than the pivot
-     * element. */
+     * than or equal to the pivot element and all elements after or equal this boundary are greater than or equal to
+     * the pivot element. */
     FUNCTION(partition, uint32_t(uint32_t, uint32_t, uint32_t))
     {
         auto S = CodeGenContext::Get().scoped_environment(); // create scoped environment
@@ -65,10 +97,10 @@ void m::wasm::quicksort(Buffer<IsGlobal> &buffer, const std::vector<SortingOpera
             }();
 
             /*----- Compare begin and last tuples to pivot element and advance cursors respectively. -----*/
-            Bool begin_lt_pivot = compare(env_begin, env_pivot, order) < 0;
+            Bool begin_le_pivot = compare(env_begin, env_pivot, order) <= 0;
             Bool last_ge_pivot  = compare(env_last, env_pivot, order) >= 0;
 
-            begin += begin_lt_pivot.to<uint32_t>();
+            begin += begin_le_pivot.to<uint32_t>();
             end -= last_ge_pivot.to<uint32_t>();
         }
 
@@ -92,7 +124,7 @@ void m::wasm::quicksort(Buffer<IsGlobal> &buffer, const std::vector<SortingOpera
 
         U32 last = end - 1U;
 
-        WHILE(end - begin >= 2U) {
+        WHILE(end - begin > 2U) {
             Var<U32> mid((begin + end) >> 1U); // (begin + end) / 2
 
             /*----- Load begin tuple. -----*/
@@ -116,7 +148,7 @@ void m::wasm::quicksort(Buffer<IsGlobal> &buffer, const std::vector<SortingOpera
                 return S.extract();
             }();
 
-            /*----- Swap pivot (median of three) to begin. ----.*/
+            /*----- Swap pivot (median of three) to begin. -----.*/
             Bool begin_le_mid  = compare(env_begin, env_mid, order) <= 0;
             Bool begin_le_last = compare(env_begin, env_last, order) <= 0;
             Bool mid_le_last   = compare(env_mid, env_last, order) <= 0;
@@ -131,7 +163,7 @@ void m::wasm::quicksort(Buffer<IsGlobal> &buffer, const std::vector<SortingOpera
             } ELSE {
                 IF (mid_le_last) {
                     IF (not begin_le_last) {
-                        swap(begin, last); // [mid, last, begin]
+                        swap(begin, last.clone()); // [mid, last, begin]
                     }; // else [mid, begin, last]
                 } ELSE {
                     swap(begin, mid); // [last, mid, begin]
@@ -139,17 +171,40 @@ void m::wasm::quicksort(Buffer<IsGlobal> &buffer, const std::vector<SortingOpera
             };
 
             /*----- Partition range [begin + 1, end[ using begin as pivot. -----*/
-            mid = partition(begin + 1U, end, begin) - 1U;
-            swap(begin, mid); // patch mid
+            mid = partition(begin + 1U, end, begin);
+            swap(begin, mid - 1U); // patch mid
 
             /*----- Recurse right partition, if necessary. -----*/
-            IF (end - mid > 2U) {
-                quicksort(mid + 1U, end);
+            IF (end - mid >= 2U) {
+                quicksort(mid, end);
             };
 
             /*----- Update end pointer. -----*/
-            end = mid;
+            end = mid - 1U;
         }
+
+        /* TODO: remove this special case handling and integrate into loop iff buffer elements are small */
+        IF (end - begin == 2U) {
+            /*----- Load begin tuple. -----*/
+            auto env_begin = [&](){
+                auto S = CodeGenContext::Get().scoped_environment();
+                load(begin);
+                return S.extract();
+            }();
+
+            /*----- Load last tuple. -----*/
+            auto env_last = [&](){
+                auto S = CodeGenContext::Get().scoped_environment();
+                load(last.clone());
+                return S.extract();
+            }();
+
+            /*----- Swap begin and last if they are not yet sorted. -----.*/
+            Bool begin_gt_last = compare(env_begin, env_last, order) > 0;
+            IF (begin_gt_last) {
+                swap(begin, last);
+            };
+        };
 
         buffer.teardown_base_address();
     }
