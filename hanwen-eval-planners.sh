@@ -45,8 +45,8 @@ MAX_CARDINALITY=10000
 MIN_RELATIONS=3
 # Associative array mapping topologies to their max. number of relations tested
 declare -A TOPOLOGIES=(
-   [chain]=63
-   [cycle]=63
+#   [chain]=25
+#   [cycle]=25
     [star]=15
    [clique]=15
 )
@@ -65,6 +65,16 @@ declare -A TOPOLOGY_STEPS=(
 )
 
 ORDERED_PLANNERS=(
+    "DPccp"
+    "BU-A*-zero"
+    "BIDIRECTIONAL"
+    "BIDIRECTIONAL"
+    "BIDIRECTIONAL"
+    "BIDIRECTIONAL"
+    "BIDIRECTIONAL"
+
+
+#    "BU-BIDIRECTIONAL-zero"
     ###### HANWEN Manuelly Test #####
     # "DPccp"
 #    "IKKBZ"
@@ -92,19 +102,19 @@ ORDERED_PLANNERS=(
 #  "BU-hanwen-layered-sorted-dynamic2-zero"
 #   "BU-hanwen-layered-sorted-dynamic3-zero"
 
-"TD-hanwen-layered-sorted2-zero"
-"TD-hanwen-layered-sorted3-zero"
-"TD-hanwen-layered-sorted6-zero"
-"TD-hanwen-layered-sorted10-zero"
-"TD-hanwen-layered-sorted15-zero"
-"TD-hanwen-layered-sorted25-zero"
-
-"TD-hanwen-layered-sorted2-sum"
-"TD-hanwen-layered-sorted3-sum"
-"TD-hanwen-layered-sorted6-sum"
-"TD-hanwen-layered-sorted10-sum"
-"TD-hanwen-layered-sorted15-sum"
-"TD-hanwen-layered-sorted25-sum"
+#"TD-hanwen-layered-sorted2-zero"
+#"TD-hanwen-layered-sorted3-zero"
+#"TD-hanwen-layered-sorted6-zero"
+#"TD-hanwen-layered-sorted10-zero"
+#"TD-hanwen-layered-sorted15-zero"
+#"TD-hanwen-layered-sorted25-zero"
+#
+#"TD-hanwen-layered-sorted2-sum"
+#"TD-hanwen-layered-sorted3-sum"
+#"TD-hanwen-layered-sorted6-sum"
+#"TD-hanwen-layered-sorted10-sum"
+#"TD-hanwen-layered-sorted15-sum"
+#"TD-hanwen-layered-sorted25-sum"
 
 #  "TD-hanwen-layered-zero"
 
@@ -318,20 +328,32 @@ do
                 unset TIME
                 set +m
                 # The following command needs pipefail
-                timeout --signal=TERM --kill-after=3s ${TIMEOUT} taskset -c 2 ${BIN} \
-                    --quiet --dryrun --times \
-                    --plan-table-las \
-                    ${PLANNER_CONFIG} \
-                    --cardinality-estimator Injected \
-                    --use-cardinality-file "${NAME}.cardinalities.json" \
-                    --statistics \
-                    "${NAME}.schema.sql" \
-                    "${NAME}.query.sql" \
-                    | grep -e '^Plan cost:' -e '^Plan enumeration:' \
-                    | cut --delimiter=':' --fields=2 \
-                    | tr -d ' ' \
-                    | paste -sd ' \n' \
-                    | while read -r COST TIME; do echo "${TOPOLOGY},${N},${PLANNER},${COST},${TIME},${SEED}" >> "${CSV}"; done
+#                timeout --signal=TERM --kill-after=3s ${TIMEOUT} taskset -c 2 ${BIN} \
+#                    --quiet --dryrun --times \
+#                    --plan-table-las \
+#                    ${PLANNER_CONFIG} \
+#                    --cardinality-estimator Injected \
+#                    --use-cardinality-file "${NAME}.cardinalities.json" \
+#                    --statistics \
+#                    "${NAME}.schema.sql" \
+#                    "${NAME}.query.sql" \
+#                    | grep -e '^Plan cost:' -e '^Plan enumeration:' \
+#                    | cut --delimiter=':' --fields=2 \
+#                    | tr -d ' ' \
+#                    | paste -sd ' \n' \
+#                    | while read -r COST TIME; do echo "${TOPOLOGY},${N},${PLANNER},${COST},${TIME},${SEED}" >> "${CSV}"; done
+                ${BIN} --quiet --dryrun --times --plan-table-las \
+                                    ${PLANNER_CONFIG} \
+                                    --cardinality-estimator Injected \
+                                    --use-cardinality-file "${NAME}.cardinalities.json" \
+                                    --statistics \
+                                    "${NAME}.schema.sql" \
+                                    "${NAME}.query.sql" \
+                                    | grep -e '^Plan cost:' -e '^Plan enumeration:' \
+                                    | cut --delimiter=':' --fields=2 \
+                                    | tr -d ' ' \
+                                    | paste -sd ' \n' \
+                                    | while read -r COST TIME; do echo "${TOPOLOGY},${N},${PLANNER},${COST},${TIME},${SEED}" >> "${CSV}";done
 
 
                 # Save and aggregate PIPESTATUS
@@ -355,7 +377,7 @@ do
                 then
                     >&2 echo '  `'" Unexpected termination: ERR=${ERR}, PIPESTATUS=(${SAVED_PIPESTATUS[@]}), configuration '${PLANNER}':"
                     >&2 cat << EOF
-timeout --signal=TERM --kill-after=3s ${TIMEOUT} taskset -c 2 ${BIN} \
+ ${BIN} \
 --quiet --dryrun --times \
 --plan-table-las \
 ${PLANNER_CONFIG} \
